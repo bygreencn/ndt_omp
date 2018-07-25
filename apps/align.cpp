@@ -1,5 +1,3 @@
-#include <iostream>
-#include <ros/ros.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
@@ -9,25 +7,55 @@
 
 #include <pclomp/ndt_omp.h>
 
+#include <iostream>
+#include <PerfCounterTimer.h>
+
 // align point clouds and measure processing time
-pcl::PointCloud<pcl::PointXYZ>::Ptr align(pcl::Registration<pcl::PointXYZ, pcl::PointXYZ>::Ptr registration, const pcl::PointCloud<pcl::PointXYZ>::Ptr& target_cloud, const pcl::PointCloud<pcl::PointXYZ>::Ptr& source_cloud ) {
-  registration->setInputTarget(target_cloud);
-  registration->setInputSource(source_cloud);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr aligned(new pcl::PointCloud<pcl::PointXYZ>());
+//pcl::PointCloud<pcl::PointXYZ>::Ptr align(pcl::Registration<pcl::PointXYZ, pcl::PointXYZ>::Ptr registration, const pcl::PointCloud<pcl::PointXYZ>::Ptr& target_cloud, const pcl::PointCloud<pcl::PointXYZ>::Ptr& source_cloud , int interials = 1) 
+//{
+//  registration->setInputTarget(target_cloud);
+//  registration->setInputSource(source_cloud);
+//  pcl::PointCloud<pcl::PointXYZ>::Ptr aligned(new pcl::PointCloud<pcl::PointXYZ>());
+//
+//  double t1 = PerfCounterTimer::GetCurrentCounter();
+//  registration->align(*aligned);
+//  double t2 = PerfCounterTimer::GetCurrentCounter();
+//  std::cout << "single : " << (t2 - t1)/PerfCounterTimer::GetFrequency() * 1000 << "[msec]" << std::endl;
+//
+//  for(int i=0; i<interials; i++) {
+//    registration->align(*aligned);
+//  }
+//  double t3 = PerfCounterTimer::GetCurrentCounter();
+//  std::cout << "10times: " << (t3 - t2) / PerfCounterTimer::GetFrequency() * 1000 << "[msec]" << std::endl;
+//  std::cout << "fitness: " << registration->getFitnessScore() << std::endl << std::endl;
+//
+//  return aligned;
+//}
+pcl::PointCloud<pcl::PointXYZ>::Ptr align(pcl::Registration<pcl::PointXYZ, pcl::PointXYZ>::Ptr registration, const pcl::PointCloud<pcl::PointXYZ>::Ptr& target_cloud, const pcl::PointCloud<pcl::PointXYZ>::Ptr& source_cloud, int interials = 1)
+{
+    registration->setInputTarget(target_cloud);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr sourced = source_cloud;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr result = nullptr;
 
-  auto t1 = ros::WallTime::now();
-  registration->align(*aligned);
-  auto t2 = ros::WallTime::now();
-  std::cout << "single : " << (t2 - t1).toSec() * 1000 << "[msec]" << std::endl;
+  
+    double t1 = PerfCounterTimer::GetCurrentCounter();
+    for (int i = interials; i > 0; i--) {
+        registration->setInputSource(sourced);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr aligned(new pcl::PointCloud<pcl::PointXYZ>());
+        registration->align(*aligned);
+        if (i > 1)
+        {
+            sourced = aligned;
+        }
+        else
+        {
+            result = aligned;
+        }
+    }
+    double t2 = PerfCounterTimer::GetCurrentCounter();
+    std::cout << "single : " << (t2 - t1)/PerfCounterTimer::GetFrequency() * 1000 << "[msec]" << interials << "times" <<std::endl;
 
-  for(int i=0; i<10; i++) {
-    registration->align(*aligned);
-  }
-  auto t3 = ros::WallTime::now();
-  std::cout << "10times: " << (t3 - t2).toSec() * 1000 << "[msec]" << std::endl;
-  std::cout << "fitness: " << registration->getFitnessScore() << std::endl << std::endl;
-
-  return aligned;
+    return result;
 }
 
 
@@ -66,13 +94,12 @@ int main(int argc, char** argv) {
   voxelgrid.filter(*downsampled);
   source_cloud = downsampled;
 
-  ros::Time::init();
-
+  pcl::PointCloud<pcl::PointXYZ>::Ptr aligned = nullptr;
   // benchmark
   std::cout << "--- pcl::NDT ---" << std::endl;
-  pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>::Ptr ndt(new pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>());
-  ndt->setResolution(1.0);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr aligned = align(ndt, target_cloud, source_cloud);
+  //pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>::Ptr ndt(new pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>());
+  //ndt->setResolution(1.0);
+  //aligned = align(ndt, target_cloud, source_cloud);
 
   std::vector<int> num_threads = {1, omp_get_max_threads()};
   std::vector<std::pair<std::string, pclomp::NeighborSearchMethod>> search_methods = {
@@ -89,7 +116,7 @@ int main(int argc, char** argv) {
       std::cout << "--- pclomp::NDT (" << search_method.first << ", " << n << " threads) ---" << std::endl;
       ndt_omp->setNumThreads(n);
       ndt_omp->setNeighborhoodSearchMethod(search_method.second);
-      aligned = align(ndt_omp, target_cloud, source_cloud);
+      aligned = align(ndt_omp, target_cloud, source_cloud,5);
     }
   }
 
